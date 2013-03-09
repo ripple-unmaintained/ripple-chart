@@ -7,9 +7,26 @@ var mysql           = require('mysql');
 var async           = require('async');
 var Remote          = require("ripple-lib").Remote;
 
+var Range           = require('./range').Range;
+
 var connection      = require("./config").connection;
 var config          = require("./config").config;
 var rippled_config  = require("./config").rippled_config;
+
+var remote;
+
+var process_validated = function (str_validated_ledgers)
+{
+  var validated_ledgers = Range.from_string(str_validated_ledgers);
+
+  if (validated_ledgers.has_member(config.genesis_ledger)) {
+    console.log("Processing: %s", str_validated_ledgers);
+  
+  }
+  else {
+    console.log("No genesis ledger: %s", str_validated_ledgers);
+  }
+}
 
 // callback(err, conn, disconnect);
 // disconnect();
@@ -130,9 +147,17 @@ var do_status = function () {
 var do_perform = function () {
   var self = this;
   
-  self.remote  =
+  remote  =
     Remote
-      .from_config(rippled_config);
+      .from_config(rippled_config)
+      .on('ledger_closed', function (m) {
+          console.log("ledger_closed: ", JSON.stringify(m, undefined, 2));
+
+          if ('validated_ledgers' in m) {
+            process_validated(m.validated_ledgers);
+          }
+        })
+      .connect();
 };
 
 var main = function () {
