@@ -1,0 +1,40 @@
+rbc.js - ripple-bitcoincharts
+
+rbc.js serve
+* Run as a web server.
+
+rbc.js status
+* Returns the status.
+
+rbc.js initdb
+* Initialize dbs.
+
+Theory
+
+This constructs a database suitable for servering to bitcoincharts.com as per:
+http://bitcoincharts.com/about/exchanges/
+
+Each time the database is created, the results may vary. Therefore, if the
+database is lost, the new database will be inconsistent with the previous
+database. All previous subscribers should subscribe from scratch to have a
+consistent database.
+
+To create, the cleanest database, the program will not being importation until the rippled server has acquired the effective genesis ledger.
+
+Operation
+
+Add curriences and markets at anytime.
+
+Interruptable the program at anytime.
+
+MySql Configuration
+
+DROP DATABASE IF EXISTS rbc;
+
+CREATE DATABASE rbc;
+
+GRANT ALL PRIVILEGES ON rbc.* to 'user'@'localhost' IDENTIFIED BY 'password';
+
+Requirements
+
+npm install async mysql@2.0.0-alpha7
