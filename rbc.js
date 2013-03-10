@@ -11,22 +11,129 @@ var Range           = require('./range').Range;
 
 var connection      = require("./config").connection;
 var config          = require("./config").config;
+var markets         = require("./config").markets;
 var rippled_config  = require("./config").rippled_config;
 
 var remote;
+var sources = [];
+
+// ledger: [ sources ]
+var wanted  = {};
+var validated_ledgers;
+
+// callback(err)
+var setup_sources = function (callback)
+{
+  // Make an array of source objects.
+  Object.keys(markets).map(function (currency) {
+      Object.keys(markets[currency]).map(function (address) {
+          sources.push({
+              currency: currency,
+              address: address
+            });
+        });
+    });
+
+  console.log("sources: ", JSON.stringify(sources, undefined, 2));
+
+  // For each source, discover its processed range.
+  db_perform(function (err, conn, disconnect) {
+      if (err)
+        throw err;
+
+      async.every(sources, function (source, callback) {
+          console.log("source: ", JSON.stringify(source));
+
+          conn.query("SELECT Done FROM Processed WHERE Currency=? AND Account=?",
+            [source.currency, source.account], 
+            function (err, results) {
+              console.log("Range: %s", JSON.stringify({ err: err, results: results}, undefined, 2));
+
+              if (!err) {
+                var ledger_next = results.length
+                  ? results[1]
+                  : config.genesis_ledger;
+
+                wanted[ledger_next] = wanted[ledger_next] || [];
+                wanted[ledger_next].push(source);
+              }
+    
+              callback(!err);
+            });
+
+        }, function (result) {
+          console.log("wanted: ", JSON.stringify(wanted, undefined, 2));
+
+          disconnect();
+          callback(!result)
+        });
+    });
+};
+
+var wanted_next = function () {
+  var ledger_min  = undefined;
+
+  Object.keys(wanted).map(function (ledger_next) {
+      if (!ledger_min || ledger_next < ledger_min)
+        ledger_min  = ledger_next;
+    });
+
+  return ledger_min;
+};
+
+// done(err)
+var process_ledger = function (next, done) {
+  console.log("process_ledger: ", next);
+
+  done("failed");
+};
+
+// Process what we can based on validated_ledgers
+// We have the genesis ledger.
+var process_range = function (validated_ledgers, done)
+{
+  // Do wanted strictly in order.
+  // XXX Later add a list of ledgers to skip in the config.
+  
+  var next  = wanted_next();
+
+  if (next && validated_ledgers.has_member(next)) {
+    process_ledger(next, function (err) {
+        if (err) {
+          done();
+        }
+        else {
+          process_range(validated_ledgers, done);
+        }
+      });
+  }
+  else
+  {
+    done();
+  }
+};
 
 var process_validated = function (str_validated_ledgers)
 {
+  var self              = this;
   var validated_ledgers = Range.from_string(str_validated_ledgers);
 
   if (validated_ledgers.has_member(config.genesis_ledger)) {
-    console.log("Processing: %s", str_validated_ledgers);
+    console.log("process_validated: %s", str_validated_ledgers);
   
+    if (!self.processing) {
+      self.processing = true;
+      process_range(validated_ledgers, function () {
+          self.processing = false;
+
+          console.log("process_validated: concluded");
+        });
+    }
   }
   else {
     console.log("No genesis ledger: %s", str_validated_ledgers);
   }
-}
+};
 
 // callback(err, conn, disconnect);
 // disconnect();
@@ -71,8 +178,9 @@ var do_db_init = function () {
 
   var sql_create_processed =  // Range of ledgers processed.
             "CREATE TABLE Processed ("
-          + "  Currency       CHARACTER(3),"
-          + "  Account        CHARACTER(35),"
+          + "  Currency     CHARACTER(3),"
+          + "  Account      CHARACTER(35),"
+          + "  Done         TEXT,"
           + "  PRIMARY KEY (Currency, Account)"
           + ") TYPE = " + config.table_type + ";";
 
@@ -90,6 +198,9 @@ var do_db_init = function () {
 
   db_perform(function (err, conn, disconnect) {
     async.waterfall([
+        function (callback) {
+          callback(err);
+        },
         function (callback) {
           conn.query(sql_drop_processed, function (err, results) {
               // console.log("drop_processed: %s", JSON.stringify(results, undefined, 2));
@@ -147,17 +258,19 @@ var do_status = function () {
 var do_perform = function () {
   var self = this;
   
-  remote  =
-    Remote
-      .from_config(rippled_config)
-      .on('ledger_closed', function (m) {
-          console.log("ledger_closed: ", JSON.stringify(m, undefined, 2));
+  setup_sources(function () {
+      remote  =
+        Remote
+          .from_config(rippled_config)
+          .on('ledger_closed', function (m) {
+              console.log("ledger_closed: ", JSON.stringify(m, undefined, 2));
 
-          if ('validated_ledgers' in m) {
-            process_validated(m.validated_ledgers);
-          }
-        })
-      .connect();
+              if ('validated_ledgers' in m) {
+                process_validated(m.validated_ledgers);
+              }
+            })
+          .connect();
+    });
 };
 
 var main = function () {
