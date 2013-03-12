@@ -19,7 +19,8 @@ database is lost, the new database will be inconsistent with the previous
 database. All previous subscribers should subscribe from scratch to have a
 consistent database.
 
-To create, the cleanest database, the program will not being importation until the rippled server has acquired the effective genesis ledger.
+To create, the cleanest database, the program will not being importation until
+the rippled server has acquired the effective genesis ledger.
 
 Operation
 
@@ -37,4 +38,4 @@ GRANT ALL PRIVILEGES ON rbc.* to 'user'@'localhost' IDENTIFIED BY 'password';
 
 Requirements
 
-npm install async mysql@2.0.0-alpha7
+npm install async mysql@2.0.0-alpha7 ripple-lib
