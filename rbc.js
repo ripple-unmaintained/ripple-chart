@@ -445,31 +445,35 @@ var process_books = function (ledger_index) {
 
                 var _side = _pair.gets.currency === 'BTC' ? 'asks' : 'bids';
 
-                books_new[_currency][_side] = books_new[_currency][_side].concat(m.offers.map(function (o) {
-                    // console.log("OFFER: ", JSON.stringify(o, undefined, 2));
+                books_new[_currency][_side] = books_new[_currency][_side].concat(
+                  m.offers
+                    .map(function (o) {
+                        // console.log("OFFER: ", JSON.stringify(o, undefined, 2));
 
-                    var _taker_gets = Amount.from_json('taker_gets_funded' in o ? o.taker_gets_funded : o.TakerGets);
-                    var _taker_pays = Amount.from_json('taker_pays_funded' in o ? o.taker_pays_funded : o.TakerPays);
+                        var _taker_gets = Amount.from_json('taker_gets_funded' in o ? o.taker_gets_funded : o.TakerGets);
+                        var _taker_pays = Amount.from_json('taker_pays_funded' in o ? o.taker_pays_funded : o.TakerPays);
 
-                    if (_side === 'asks') {
-                      var _tg = _taker_gets;
-                      var _tp = _taker_pays;
+                        if (_side === 'asks') {
+                          var _tg = _taker_gets;
+                          var _tp = _taker_pays;
 
-                      _taker_gets = _tp;
-                      _taker_pays = _tg;
-                    }
+                          _taker_gets = _tp;
+                          _taker_pays = _tg;
+                        }
 
-                    var _price      = _taker_gets.divide(_taker_pays).to_human({
-                                        precision: 8,
-                                        group_sep: false,
-                                      });
-                    var _amount     = _taker_pays.to_human({
-                                        precision: 8,
-                                        group_sep: false,
-                                      });
+                        var _price      = _taker_gets.divide(_taker_pays).to_human({
+                                            precision: 8,
+                                            group_sep: false,
+                                          });
+                        var _amount     = _taker_pays.to_human({
+                                            precision: 8,
+                                            group_sep: false,
+                                          });
 
-                    return [_price, _amount];
-                  }));
+                        return Number(_price) ? [_price, _amount] : null;
+                      })
+                    .filter(function (o) { return o; })
+                  );
 
                 callback();
               })
@@ -486,6 +490,9 @@ var process_books = function (ledger_index) {
           }
           else {
             // console.log("REVISE BOOK: %s %s", _currency, JSON.stringify(books_new[_currency], undefined, 2));
+            books_new[_currency].bids.sort(function (a, b) { return Number(b[0])-Number(a[0]); });
+            books_new[_currency].asks.sort(function (a, b) { return Number(a[0])-Number(b[0]); });
+
             books[_currency] = books_new[_currency];
           }
 
@@ -521,11 +528,11 @@ var do_reset = function () {
             })
         },
         function (callback) {
-            var sql_create_processed =  // Range of ledgers processed.
+            var sql_create_processed = 
                 "CREATE TABLE Processed ("
               + "  Currency     CHARACTER(3),"
               + "  Account      CHARACTER(35),"
-              + "  Done         TEXT,"
+              + "  Done         TEXT,"                            // Range of ledgers processed.
               + "  PRIMARY KEY (Currency, Account)"
               + ") TYPE = " + config.table_type + ";";
 
