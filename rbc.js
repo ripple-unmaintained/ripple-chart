@@ -1,4 +1,7 @@
 #!/usr/bin/node
+//
+// Ripple server for bitcoincharts.com as per http://bitcoincharts.com/about/exchanges/
+//
 // Served at: /CUR/trades.json?since=123
 // Served at: /CUR/orderbook.json
 //
@@ -7,8 +10,10 @@
 // - Serve web pages
 //
 
-var mysql           = require('mysql');
 var async           = require('async');
+var http            = require("http");
+var mysql           = require('mysql');
+var url             = require("url");
 var Amount          = require("ripple-lib").Amount;
 var Currency        = require("ripple-lib").Currency;
 var Remote          = require("ripple-lib").Remote;
@@ -16,11 +21,12 @@ var UInt160         = require("ripple-lib").UInt160;
 
 var Range           = require('./range').Range;
 
-var mysql_config    = require("./config").mysql_config;
-var config          = require("./config").config;
-var markets         = require("./config").markets;
-var rippled_config  = require("./config").rippled_config;
 var btc_gateways    = require("./config").btc_gateways;
+var config          = require("./config").config;
+var httpd_config    = require("./config").httpd_config;
+var markets         = require("./config").markets;
+var mysql_config    = require("./config").mysql_config;
+var rippled_config  = require("./config").rippled_config;
 
 var remote;
 var sources = [];
@@ -29,6 +35,9 @@ var sources = [];
 // CUR_ACCOUNT: <ledger>
 var wanted  = {};
 var validated_ledgers;
+
+// CUR : { "asks" : [[price, amount], ...], "bids" : [...] }
+var books = {};
 
 var wanted_ledger = function (ledger) {
   return Object.keys(wanted[ledger] || {}).map(function(k) {
@@ -84,9 +93,7 @@ var wanted_min = function () {
   return ledger_min;
 };
 
-// callback(err)
-var setup_sources = function (callback)
-{
+var setup_tables = function () {
   // Make an array of source objects.
   Object.keys(markets).forEach(function (currency) {
       Object.keys(markets[currency]).forEach(function (address) {
@@ -95,9 +102,15 @@ var setup_sources = function (callback)
               address: address
             });
         });
-    });
 
-  console.log("sources: ", JSON.stringify(sources, undefined, 2));
+      books[currency] = { asks: [], bids: [] };
+    });
+};
+
+// callback(err)
+var setup_sources = function (callback)
+{
+  // console.log("sources: ", JSON.stringify(sources, undefined, 2));
 
   // For each source, discover its processed range.
   db_perform(function (err, conn, done) {
@@ -105,7 +118,7 @@ var setup_sources = function (callback)
         throw err;
 
       async.every(sources, function (source, callback) {
-          console.log("source: ", JSON.stringify(source));
+          // console.log("source: ", JSON.stringify(source));
 
           conn.query("SELECT Done FROM Processed WHERE Currency=? AND Account=?",
             [source.currency, source.account], 
@@ -364,7 +377,6 @@ var process_validated = function (str_validated_ledgers)
 
 // callback(err, conn, done);
 // done(err);
-// done(err);
 var db_perform = function (callback, done) {
   // console.log("mysql_config: ", JSON.stringify(mysql_config.user, undefined, 2));
 
@@ -490,6 +502,141 @@ var do_status = function () {
   };
 };
 
+var do_httpd = function () {
+  var self    = this;
+
+  var server  = http.createServer(function (req, res) {
+      console.log("CONNECT");
+      var input = "";
+
+      req.setEncoding();
+
+      req.on('data', function (buffer) {
+          // console.log("DATA: %s", buffer);
+          input = input + buffer;
+        });
+
+      req.on('end', function () {
+          // console.log("END");
+
+          var _parsed = url.parse(req.url, true);
+          var _m;
+
+          // console.log("URL: %s", req.url);
+          // console.log("HEADERS: %s", JSON.stringify(req.headers, undefined, 2));
+          // console.log("INPUT: %s:", JSON.stringify(input));
+          // console.log("_parsed: %s", JSON.stringify(_parsed, undefined, 2));
+
+          if (_parsed.pathname === "/") {
+            res.statusCode = 200;
+            res.end(JSON.stringify({
+                processing: self.processing,
+                btc_gateways: btc_gateways,
+                markets: markets
+              }, undefined, 2));
+
+          }
+          else if (_m = _parsed.pathname.match(/^\/(...)\/trades.json$/)) {
+            var   _market   = _m[1];
+            var   _since    = _parsed.query.since;
+
+            if (!(_market in markets)) {
+              res.statusCode = 204;
+              res.end(JSON.stringify({
+                  pathname: _parsed.pathname,
+                  message:  'bad market',
+                  market:   _market
+                }));
+            }
+            else if (!_since) {
+              res.statusCode = 204;
+              res.end(JSON.stringify({
+                  trades: true,
+                  since: 'missing'
+                }));
+            }
+            else {
+              db_perform(function (err, conn, done) {
+                  if (err) {
+                    done(err);
+                  }
+                  else {
+                    conn.query("SELECT * FROM Transactions WHERE Currency=? AND Tid >= ? ORDER BY Tid ASC LIMIT ?",
+                      [_market, _since, config.trade_limit],
+                      function (err, results) {
+                          if (err) {
+                            console.log("err: %s", JSON.stringify(err, undefined, 2));
+                          }
+                          else {
+//                          console.log("results: %s", JSON.stringify(results, undefined, 2));
+
+                            res.statusCode = 200;
+                            res.end(JSON.stringify(
+                                results.map(function (r) {
+                                    return {
+                                        date:   r.LedgerTime+946684800,
+                                        price:  r.Price, 
+                                        amount: r.Amount,
+                                        tid:    r.Tid
+                                      };
+                                  }), undefined, 1));
+                          }
+
+                          done(err);
+                        });
+                  }
+                },
+                function (err) {
+                  if (err) {
+                    res.statusCode = 500;
+                    res.end(JSON.stringify({
+                        trades: true,
+                        market: _market,
+                        since: _since
+                      }));
+                  }
+                });
+            }
+          }
+          else if (_m = _parsed.pathname.match(/^\/(...)\/orderbook.json$/)) {
+            var   _market   = _m[1];
+            var   _since    = _parsed.query.since;
+
+            if (!(_market in markets)) {
+              res.statusCode = 204;
+              res.end(JSON.stringify({
+                  pathname: _parsed.pathname,
+                  message:  'bad market',
+                  market:   _market
+                }));
+            }
+            else {
+              res.statusCode = 200;
+              res.end(JSON.stringify(books[_market], undefined, 1));
+            }
+          }
+          else
+          {
+            res.statusCode = 404;
+            res.end(JSON.stringify({
+                message: 'not found',
+                parsed: JSON.stringify(_parsed, undefined, 2)
+              }));
+          }
+        });
+
+      req.on('close', function () {
+          console.log("CLOSE");
+        });
+    });
+
+  server.listen(httpd_config.port, httpd_config.ip, undefined,
+    function () {
+      console.log("Listening at: %s:%s", httpd_config.ip, httpd_config.port);
+    });
+  
+};
+
 var do_perform = function () {
   var self = this;
   
@@ -500,7 +647,6 @@ var do_perform = function () {
           .on('ledger_closed', function (m) {
               console.log("ledger_closed: ", JSON.stringify(m, undefined, 2));
 
-// m.validated_ledgers = '32570-335732';
               if ('validated_ledgers' in m) {
                 process_validated(m.validated_ledgers);
               }
@@ -521,6 +667,9 @@ var main = function () {
   }
   else if (3 === process.argv.length && "perform" === process.argv[2])
   {
+    setup_tables();
+
+    do_httpd();
     do_perform();
   }
   else if (3 === process.argv.length && "status" === process.argv[2])
