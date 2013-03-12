@@ -7,7 +7,6 @@
 //
 // TODO:
 // - Finding min ledger is broken
-// - Serve web pages
 //
 
 var async           = require('async');
@@ -35,6 +34,7 @@ var sources = [];
 // CUR_ACCOUNT: <ledger>
 var wanted  = {};
 var validated_ledgers;
+var info    = {};
 
 // CUR : { "asks" : [[price, amount], ...], "bids" : [...] }
 var books = {};
@@ -149,7 +149,7 @@ var insert_ledger = function (conn, records, done) {
   // console.log("source: ", JSON.stringify(source));
   if (records.length) 
   {
-    conn.query("INSERT INTO Transactions (Hash, Currency, LedgerTime, LedgerIndex, Price, Amount) VALUES ?",
+    conn.query("INSERT INTO Trades (Hash, Currency, LedgerTime, LedgerIndex, Price, Amount) VALUES ?",
         records.map(function (r) {
           return [[ r.Hash, r.Currency, r.LedgerTime, r.LedgerIndex, r.Price, r.Amount ]];
         }),
@@ -496,7 +496,7 @@ var process_books = function (ledger_index) {
       });
 };
 
-var do_db_init = function () {
+var do_reset = function () {
   db_perform(function (err, conn, done) {
     async.waterfall([
         function (callback) {
@@ -512,7 +512,7 @@ var do_db_init = function () {
             })
         },
         function (callback) {
-          var sql_drop_transactions = "DROP TABLE IF EXISTS Transactions;";
+          var sql_drop_transactions = "DROP TABLE IF EXISTS Trades;";
 
           conn.query(sql_drop_transactions, function (err, results) {
               // console.log("drop_transactions: %s", JSON.stringify(results, undefined, 2));
@@ -537,7 +537,7 @@ var do_db_init = function () {
         },
         function (callback) {
             var sql_create_transactions =
-                "CREATE TABLE Transactions ("
+                "CREATE TABLE Trades ("
               + "  Currency     CHARACTER(3),"
               + "  LedgerTime   INTEGER UNSIGNED,"               // ledger_time
               + "  LedgerIndex  INTEGER UNSIGNED,"               // ledger_index
@@ -567,31 +567,18 @@ var do_db_init = function () {
     });
 };
 
-var do_status = function () {
-  console.log("status: not implemented.");
-
-  var ledger_index = 2000;
-
-  // Returns how far caught up each source is.
-  return {
-    USD: {
-      'rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B' : ledger_index,
-    },
-  };
-};
-
 var do_httpd = function () {
   var self    = this;
 
   var server  = http.createServer(function (req, res) {
-      console.log("CONNECT");
-      var input = "";
+      // console.log("CONNECT");
+      // var input = "";
 
       req.setEncoding();
 
       req.on('data', function (buffer) {
           // console.log("DATA: %s", buffer);
-          input = input + buffer;
+          // input = input + buffer;
         });
 
       req.on('end', function () {
@@ -608,17 +595,18 @@ var do_httpd = function () {
           if (_parsed.pathname === "/") {
             res.statusCode = 200;
             res.end(JSON.stringify({
-                processing: self.processing,
+                processing:   self.processing,
                 btc_gateways: btc_gateways,
-                markets: markets
+                markets:      markets,
+                info:         info
               }, undefined, 2));
 
           }
           else if (_m = _parsed.pathname.match(/^\/(...)\/trades.json$/)) {
-            var   _market   = _m[1];
+            var   _market   = _m[1] && _m[1] in markets && _m[1];
             var   _since    = _parsed.query.since;
 
-            if (!(_market in markets)) {
+            if (!_market) {
               res.statusCode = 204;
               res.end(JSON.stringify({
                   pathname: _parsed.pathname,
@@ -639,7 +627,7 @@ var do_httpd = function () {
                     done(err);
                   }
                   else {
-                    conn.query("SELECT * FROM Transactions WHERE Currency=? AND Tid >= ? ORDER BY Tid ASC LIMIT ?",
+                    conn.query("SELECT * FROM Trades WHERE Currency=? AND Tid >= ? ORDER BY Tid ASC LIMIT ?",
                       [_market, _since, config.trade_limit],
                       function (err, results) {
                           if (err) {
@@ -703,9 +691,9 @@ var do_httpd = function () {
           }
         });
 
-      req.on('close', function () {
-          console.log("CLOSE");
-        });
+//      req.on('close', function () {
+//          console.log("CLOSE");
+//        });
     });
 
   server.listen(httpd_config.port, httpd_config.ip, undefined,
@@ -723,7 +711,9 @@ var do_perform = function () {
         Remote
           .from_config(rippled_config)
           .on('ledger_closed', function (m) {
-              console.log("ledger_closed: ", JSON.stringify(m, undefined, 2));
+              // console.log("ledger_closed: ", JSON.stringify(m, undefined, 2));
+
+              info.ledger = m;
 
               if ('validated_ledgers' in m) {
                 process_validated(m.validated_ledgers);
@@ -743,16 +733,15 @@ var do_perform = function () {
 var do_usage = function () {
   console.log(
       "Usage: %s\n"
-    + " db_init - initialize dbs\n"
-    + " perform- serve and update the database\n",
-    + " status - show status\n",
+    + " reset - initialize dbs\n"
+    + " perform - serve and update the database\n",
     process.argv[1]);
 };
 
 var main = function () {
-  if (3 === process.argv.length && "db_init" === process.argv[2])
+  if (3 === process.argv.length && "reset" === process.argv[2])
   {
-    do_db_init();
+    do_reset();
   }
   else if (3 === process.argv.length && "perform" === process.argv[2])
   {
@@ -760,10 +749,6 @@ var main = function () {
 
     do_httpd();
     do_perform();
-  }
-  else if (3 === process.argv.length && "status" === process.argv[2])
-  {
-    do_status();
   }
   else
   {
