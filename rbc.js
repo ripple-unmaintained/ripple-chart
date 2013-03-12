@@ -409,13 +409,91 @@ var db_perform = function (callback, done) {
       });
 };
 
-var do_usage = function () {
-  console.log(
-      "Usage: %s\n"
-    + " db_init - initialize dbs\n"
-    + " perform- serve and update the database\n",
-    + " status - show status\n",
-    process.argv[1]);
+var process_books = function (ledger_index) {
+  var books_new = {};
+
+  Object.keys(markets).forEach(function (_currency) {
+      books_new[_currency] = { asks: [], bids: [] };
+    });
+
+  // console.log("MARKETS %s", JSON.stringify(Object.keys(markets)));
+  async.each(Object.keys(markets), function (_currency, market_callback) {
+      var _pairs  = [];
+
+      Object.keys(markets[_currency]).forEach(function (cur_address) {
+        var _cur  = {
+          currency: _currency,
+          issuer:   cur_address,
+        };
+
+        Object.keys(btc_gateways).forEach(function (btc_address) {
+            var _btc  = {
+              currency: 'BTC',
+              issuer:   btc_address,
+            };
+
+            _pairs.push({ gets: _btc, pays: _cur }, { gets: _cur, pays: _btc });
+          });
+      });
+
+      // console.log("MARKET> %s", _currency);
+      async.some(_pairs, function (_pair, callback) {
+          remote.request_book_offers(_pair.gets, _pair.pays)
+            .ledger_index(ledger_index)
+            .on('success', function (m) {
+                // console.log("BOOK: ", JSON.stringify(m, undefined, 2));
+
+                var _side = _pair.gets.currency === 'BTC' ? 'asks' : 'bids';
+
+                books_new[_currency][_side] = books_new[_currency][_side].concat(m.offers.map(function (o) {
+                    // console.log("OFFER: ", JSON.stringify(o, undefined, 2));
+
+                    var _taker_gets = Amount.from_json('taker_gets_funded' in o ? o.taker_gets_funded : o.TakerGets);
+                    var _taker_pays = Amount.from_json('taker_pays_funded' in o ? o.taker_pays_funded : o.TakerPays);
+
+                    if (_side === 'asks') {
+                      var _tg = _taker_gets;
+                      var _tp = _taker_pays;
+
+                      _taker_gets = _tp;
+                      _taker_pays = _tg;
+                    }
+
+                    var _price      = _taker_gets.divide(_taker_pays).to_human({
+                                        precision: 8,
+                                        group_sep: false,
+                                      });
+                    var _amount     = _taker_pays.to_human({
+                                        precision: 8,
+                                        group_sep: false,
+                                      });
+
+                    return [_price, _amount];
+                  }));
+
+                callback();
+              })
+            .on('error', function (m) {
+                console.log("ERROR BOOK: ", JSON.stringify(m, undefined, 2));
+
+                callback(m);
+              })
+            .request();
+            
+        }, function (err) {
+          if (err) {
+            console.log("process_books: error: ledger_index: %s market: %s", ledger_index, _currency);
+          }
+          else {
+            // console.log("REVISE BOOK: %s %s", _currency, JSON.stringify(books_new[_currency], undefined, 2));
+            books[_currency] = books_new[_currency];
+          }
+
+          market_callback(err);
+        });
+
+      }, function (err) {
+      });
 };
 
 var do_db_init = function () {
@@ -649,6 +727,8 @@ var do_perform = function () {
 
               if ('validated_ledgers' in m) {
                 process_validated(m.validated_ledgers);
+
+                process_books(m.ledger_index);
               }
             })
           .on('error', function (e) {
@@ -658,6 +738,15 @@ var do_perform = function () {
 
           .connect();
     });
+};
+
+var do_usage = function () {
+  console.log(
+      "Usage: %s\n"
+    + " db_init - initialize dbs\n"
+    + " perform- serve and update the database\n",
+    + " status - show status\n",
+    process.argv[1]);
 };
 
 var main = function () {
