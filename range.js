@@ -45,9 +45,9 @@ Range.prototype.has_member = function (n) {
   return !this.value.every(function (r) {
       // Return true if n is not r.
 
-      return Number === typeof r
+      return 'number' === typeof r
         ? n !== r
-        : (n < r[0] && n > r[1])
+        : (n < r[0] || n > r[1]);
     });
 };
 
