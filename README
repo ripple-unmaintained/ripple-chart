@@ -1,12 +1,9 @@
-rbc.js - ripple-chart
+rchart.js - ripple-chart
 
-rbc.js serve
+rchart.js serve
 * Run as a web server.
 
-rbc.js status
-* Returns the status.
-
-rbc.js initdb
+rchart.js reset
 * Initialize dbs.
 
 Theory

@@ -7,9 +7,6 @@
 // Served at: /CUR/trades.json?since=123
 // Served at: /CUR/orderbook.json
 //
-// TODO:
-// - Finding min ledger is broken
-//
 
 var async           = require('async');
 var http            = require("http");
