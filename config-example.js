@@ -1,5 +1,5 @@
 //
-// ripple-bitcoincharts: config-example.js
+// ripple-chart: config-example.js
 //
 // mysql -u 'newcoin' -pfoobar rbc
 exports.mysql_config = {
