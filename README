@@ -26,7 +26,7 @@ Operation
 
 Add curriences and markets at anytime.
 
-Interruptable the program at anytime.
+Interrupt the program at anytime.
 
 Services pages at:
     http://a.b.c.d/
@@ -39,7 +39,7 @@ DROP DATABASE IF EXISTS rbc;
 
 CREATE DATABASE rbc;
 
-GRANT ALL PRIVILEGES ON rbc.* to 'user'@'localhost' IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES ON rbc.* to 'newcoin@localhost' IDENTIFIED BY 'password';
 
 Requirements
 
