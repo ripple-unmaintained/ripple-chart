@@ -30,77 +30,112 @@ var rippled_config  = require("./config").rippled_config;
 var remote;
 var sources = [];
 
-// ledger: { CUR_ACCOUNT: true }
-// CUR_ACCOUNT: <ledger>
-var wanted  = {};
-var validated_ledgers;
-var info    = {};
+var processed = {
+};
 
+// Information to serve on the status page.
+var info    = {
+  btc_gateways: btc_gateways,
+  markets:      markets,
+};
+
+// A cache of the asks and bids for all order books cared about.
+// The web server services this structure.
+// This structure is updated on each ledger_close.
 // CUR : { "asks" : [[price, amount], ...], "bids" : [...] }
 var books = {};
 
-var wanted_ledger = function (ledger) {
-  return Object.keys(wanted[ledger] || {}).map(function(k) {
-      var parts = k.split(":");
-      
-      return {
-        currency: parts[0],
-        address: parts[1]
-      };
-    });
-};
+// Return the minimum next ledger to process.
+var leger_next = function () {
+  var   ledger_index;
 
-var wanted_get = function (source) {
-  var key = source.currency + ":" + source.address;
+  Object.keys(markets).forEach(function (currency) {
+      Object.keys(markets[currency]).forEach(function (address) {
+          var i = processed[currency][address].is_empty()
+                    ? config.genesis_ledger
+                    : processed[currency][address].last()+1;
 
-  return wanted[key];
-};
-
-var wanted_set = function (source, ledger_next, ledger_old) {
-//  console.log("before", JSON.stringify(wanted, undefined, 2));
-  var key = source.currency + ":" + source.address;
-
-  if (ledger_old && wanted[ledger_old]) {
-    delete wanted[ledger_old][key];
-
-    if (!wanted[ledger_old].length)
-      delete wanted[ledger_old];
-
-    delete wanted[key];
-  }
-
-  if (ledger_next)
-  {
-    wanted[key] = ledger_next;
-
-    wanted[ledger_next] = wanted[ledger_next] || {};
-    wanted[ledger_next][key]  = true;
-  }
-//  console.log("after", JSON.stringify(wanted, undefined, 2));
-};
-
-var wanted_min = function () {
-  var ledger_min  = undefined;
-
-  Object.keys(wanted).forEach(function (ledger_next) {
-      var ledger  = Number(ledger_next);
-
-      if (ledger_next === String(ledger)
-        && (!ledger_min || ledger < ledger_min))
-        ledger_min  = ledger;
+          if (!ledger_index || i < ledger_index) {
+            ledger_index  = i; 
+          }
+        });
     });
 
-  return ledger_min;
+//console.log("leger_next: %s", JSON.stringify(ledger_index));
+  return ledger_index;
+};
+
+// Return an array of sources that want a ledger_index next.
+var wanted_ledger = function (ledger_index) {
+  var _wanted  = [];
+
+  Object.keys(markets).forEach(function (currency) {
+      Object.keys(markets[currency]).forEach(function (address) {
+          var _next = processed[currency][address].is_empty()
+                        ? config.genesis_ledger
+                        : processed[currency][address].last()+1;
+
+          if (_next === ledger_index) {
+            _wanted.push({
+                currency: currency,
+                issuer:   address
+              });
+          }
+        });
+    });
+
+//console.log("wanted: %s", JSON.stringify(_wanted));
+  return _wanted;
+};
+
+var set_processed = function (source, ledger_index) {
+// console.log("processed% %s > '%s'", JSON.stringify(source), JSON.stringify(processed, undefined, 2));
+    var   _processed  = processed[source.currency][source.issuer].insert(ledger_index);
+
+    processed[source.currency][source.issuer] = _processed
+//console.log("_processed% %s > '%s'", JSON.stringify(source), _processed.to_string());
+};
+
+var replace_processed = function (conn, done) {
+  var _rows  = [];
+
+  Object.keys(markets).forEach(function (currency) {
+      Object.keys(markets[currency]).forEach(function (address) {
+            _rows.push(
+              [
+                currency,
+                address,
+                processed[currency][address].to_string(),
+              ]);
+        });
+    });
+
+// console.log("REPLACE: ", JSON.stringify(_rows, undefined, 2));
+
+  conn.query("REPLACE Processed (Currency, Account, Done) VALUES ?",
+    [_rows],
+    function (err, results) {
+      if (err)
+      {
+        console.log("ERR: REPLACE: %s", JSON.stringify({ err: err, results: results}, undefined, 2));
+      }
+
+      done(err);
+    });
 };
 
 var setup_tables = function () {
   // Make an array of source objects.
   Object.keys(markets).forEach(function (currency) {
+      processed[currency] = {};
+
       Object.keys(markets[currency]).forEach(function (address) {
           sources.push({
               currency: currency,
-              address: address
+              issuer:   address
             });
+
+          processed[currency][address] = new Range;
         });
 
       books[currency] = { asks: [], bids: [] };
@@ -117,39 +152,26 @@ var setup_sources = function (callback)
       if (err)
         throw err;
 
-      async.every(sources, function (source, callback) {
-          // console.log("source: ", JSON.stringify(source));
+      conn.query("SELECT * FROM Processed",
+        function (err, results) {
+          // console.log("Range: %s", JSON.stringify({ err: err, results: results}, undefined, 2));
 
-          conn.query("SELECT Done FROM Processed WHERE Currency=? AND Account=?",
-            [source.currency, source.account], 
-            function (err, results) {
-              console.log("Range: %s", JSON.stringify({ err: err, results: results}, undefined, 2));
+          if (!err) {
+            results.map(function (row) {
+                processed[row.Currency][row.Account]  = Range.from_string(row.Done);
+              });
+          }
 
-              if (!err) {
-                var ledger_next = results.length
-                  ? results[1]
-                  : config.genesis_ledger;
-
-                wanted_set(source, Number(ledger_next));
-              }
-    
-              callback(!err);
-            });
-
-        }, function (result) {
-          console.log("wanted: ", JSON.stringify(wanted, undefined, 2));
-
-          done();
-          callback(!result)
+          callback(!err);
         });
     });
 };
 
 var insert_ledger = function (conn, records, done) {
-  // console.log("source: ", JSON.stringify(source));
+  // console.log("source: ", JSON.stringify(records));
   if (records.length) 
   {
-    conn.query("INSERT INTO Trades (Hash, Currency, LedgerTime, LedgerIndex, Price, Amount) VALUES ?",
+    conn.query("INSERT Trades (Hash, Currency, LedgerTime, LedgerIndex, Price, Amount) VALUES ?",
         records.map(function (r) {
           return [[ r.Hash, r.Currency, r.LedgerTime, r.LedgerIndex, r.Price, r.Amount ]];
         }),
@@ -252,14 +274,6 @@ var process_ledger = function (conn, ledger_index, done) {
                     && (taker_got.is_native()
                       || (markets[got_currency] && markets[got_currency][got_issuer]))) { // Have an counter currency we care about.
 
-                    if (!ledger_out)
-                    {
-                      ledger_out = true;
-                      console.log("LEDGER: ", ledger_index);
-                      // console.log("LEDGER: ", JSON.stringify(ledger, undefined, 2));
-                      // console.log("t: ", JSON.stringify(t, undefined, 2));
-                    }
-
                     var record = {
                       Hash:         t.hash,
                       Currency:     got_currency,
@@ -275,7 +289,15 @@ var process_ledger = function (conn, ledger_index, done) {
                                       }),
                     };
 
-                    console.log("Record: ", JSON.stringify(record));
+                    if (!ledger_out)
+                    {
+                      ledger_out = true;
+                      // console.log("LEDGER: ", ledger_index);
+                      // console.log("LEDGER: ", JSON.stringify(ledger, undefined, 2));
+                      // console.log("t: ", JSON.stringify(t, undefined, 2));
+                    }
+
+                    // console.log("Record: ", JSON.stringify(record));
 
                     trades.push(record);
 
@@ -303,16 +325,17 @@ var process_ledger = function (conn, ledger_index, done) {
           function (err) {
             if (!err)
             {
-              // Advance to next ledger.
+              // Mark ledger as processed for each source that needs it.
               wanted_ledger(ledger_index).forEach(function (s) {
-                  // console.log("GET: %s/%s", JSON.stringify(wanted_get(s)), JSON.stringify(ledger_index));
-
-                  //console.log("DOING: ", JSON.stringify(s, undefined, 2));
-
-                  wanted_set(s, Number(ledger_index)+1, Number(ledger_index));
+                  set_processed(s, ledger_index);
                 });
-            }
 
+              // replace_processed(conn, done);
+            }
+            else
+            {
+              // done(err);
+            }
             done(err);
           });
       })
@@ -326,10 +349,11 @@ var process_range = function (conn, validated_ledgers, done)
   // Do wanted strictly in order.
   // XXX Later add a list of ledgers to skip in the config.
   
-  var ledger_index  = wanted_min();
-//console.log("MIN: ", ledger_index);
+  var ledger_index  = leger_next();
+// console.log("NEXT: ", ledger_index);
+// console.log("validated_ledgers: %s / %s", validated_ledgers.to_string(), validated_ledgers.is_member(ledger_index));
 
-  if (ledger_index && validated_ledgers.has_member(ledger_index)) {
+  if (ledger_index && validated_ledgers.is_member(ledger_index)) {
     process_ledger(conn, ledger_index, function (err) {
         if (err) {
           done(err);
@@ -341,7 +365,8 @@ var process_range = function (conn, validated_ledgers, done)
   }
   else
   {
-    done();
+    // Save progress to db.
+    replace_processed(conn, done);
   }
 };
 
@@ -351,7 +376,7 @@ var process_validated = function (str_validated_ledgers)
   var validated_ledgers = Range.from_string(str_validated_ledgers);
 
   // Skip processing, if rippled does not yet contain the effective genesis ledger.
-  if (validated_ledgers.has_member(Number(config.genesis_ledger))) {
+  if (validated_ledgers.is_member(config.genesis_ledger)) {
     if (self.processing) {
       console.log("process_validated: processing in progress: deferring: %s", str_validated_ledgers);
 
@@ -603,8 +628,6 @@ var do_httpd = function () {
             res.statusCode = 200;
             res.end(JSON.stringify({
                 processing:   self.processing,
-                btc_gateways: btc_gateways,
-                markets:      markets,
                 info:         info
               }, undefined, 2));
 
