@@ -36,7 +36,7 @@ DROP DATABASE IF EXISTS rbc;
 
 CREATE DATABASE rbc;
 
-GRANT ALL PRIVILEGES ON rbc.* to 'newcoin@localhost' IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES ON rbc.* to 'rbc'@'localhost' IDENTIFIED BY 'password';
 
 Requirements
 
