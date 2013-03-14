@@ -25,10 +25,13 @@ Add curriences and markets at anytime.
 
 Interrupt the program at anytime.
 
+This warning is expected:
+* (node) warning: possible EventEmitter memory leak detected.
+
 Services pages at:
-    http://a.b.c.d/
-    http://a.b.c.d/XYZ/trades.json?since=ABC
-    http://a.b.c.d/XYZ/orderbook.json
+* http://a.b.c.d/
+* http://a.b.c.d/XYZ/trades.json?since=ABC
+* http://a.b.c.d/XYZ/orderbook.json
 
 MySql Configuration
 
@@ -41,3 +44,8 @@ GRANT ALL PRIVILEGES ON rbc.* to 'rbc'@'localhost' IDENTIFIED BY 'password';
 Requirements
 
 npm install async mysql@2.0.0-alpha7 ripple-lib
+
+Live Server
+
+Currently Opencoin Inc runs this server at:
+* https://ripple.com/charts/
