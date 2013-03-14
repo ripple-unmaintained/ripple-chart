@@ -92,6 +92,8 @@ var set_processed = function (source, ledger_index) {
     var   _processed  = processed[source.currency][source.issuer].insert(ledger_index);
 
     processed[source.currency][source.issuer] = _processed
+
+    info  = _processed;
 //console.log("_processed% %s > '%s'", JSON.stringify(source), _processed.to_string());
 };
 
