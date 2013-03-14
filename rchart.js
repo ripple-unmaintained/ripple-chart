@@ -648,7 +648,7 @@ var do_httpd = function () {
                   market:   _market
                 }));
             }
-            else if (!_since) {
+            else if (!_since || !_since.match(/^\d+$/)) {
               res.statusCode = 204;
               res.end(JSON.stringify({
                   trades: true,
@@ -662,7 +662,7 @@ var do_httpd = function () {
                   }
                   else {
                     conn.query("SELECT * FROM Trades WHERE Currency=? AND Tid >= ? ORDER BY Tid ASC LIMIT ?",
-                      [_market, _since, config.trade_limit],
+                      [_market, Number(_since), config.trade_limit],
                       function (err, results) {
                           if (err) {
                             console.log("err: %s", JSON.stringify(err, undefined, 2));
