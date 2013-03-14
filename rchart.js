@@ -93,7 +93,7 @@ var set_processed = function (source, ledger_index) {
 
     processed[source.currency][source.issuer] = _processed
 
-    info.processed  = _processed;
+    info.processed  = processed;
 //console.log("_processed% %s > '%s'", JSON.stringify(source), _processed.to_string());
 };
 
