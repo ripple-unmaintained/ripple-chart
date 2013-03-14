@@ -120,6 +120,9 @@ var replace_processed = function (conn, done) {
       {
         console.log("ERR: REPLACE: %s", JSON.stringify({ err: err, results: results}, undefined, 2));
       }
+      else {
+        info.replaced  = processed;
+      }
 
       done(err);
     });
