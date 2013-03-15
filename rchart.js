@@ -646,14 +646,14 @@ var do_httpd = function () {
                   pathname: _parsed.pathname,
                   message:  'bad market',
                   market:   _market
-                }));
+                }, undefined, 2));
             }
             else if (!_since || !_since.match(/^\d+$/)) {
               res.statusCode = 204;
               res.end(JSON.stringify({
                   trades: true,
                   since: 'missing'
-                }));
+                }, undefined, 2));
             }
             else {
               db_perform(function (err, conn, done) {
@@ -661,7 +661,7 @@ var do_httpd = function () {
                     done(err);
                   }
                   else {
-                    conn.query("SELECT * FROM Trades WHERE Currency=? AND Tid >= ? ORDER BY Tid ASC LIMIT ?",
+                    conn.query("SELECT * FROM Trades WHERE Currency=? AND Tid > ? ORDER BY Tid ASC LIMIT ?",
                       [_market, Number(_since), config.trade_limit],
                       function (err, results) {
                           if (err) {
@@ -693,7 +693,7 @@ var do_httpd = function () {
                         trades: true,
                         market: _market,
                         since: _since
-                      }));
+                      }, undefined, 2));
                   }
                 });
             }
@@ -708,7 +708,7 @@ var do_httpd = function () {
                   pathname: _parsed.pathname,
                   message:  'bad market',
                   market:   _market
-                }));
+                }, undefined, 2));
             }
             else {
               res.statusCode = 200;
@@ -721,7 +721,7 @@ var do_httpd = function () {
             res.end(JSON.stringify({
                 message: 'not found',
                 parsed: JSON.stringify(_parsed, undefined, 2)
-              }));
+              }, undefined, 2));
           }
         });
 
