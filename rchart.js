@@ -629,11 +629,10 @@ var do_httpd = function () {
           // console.log("_parsed: %s", JSON.stringify(_parsed, undefined, 2));
 
           if (_parsed.pathname === "/") {
+            info.processing = self.processing;
+
             res.statusCode = 200;
-            res.end(JSON.stringify({
-                processing:   self.processing,
-                info:         info
-              }, undefined, 2));
+            res.end(JSON.stringify(info, undefined, 2));
 
           }
           else if (_m = _parsed.pathname.match(/^\/(...)\/trades.json$/)) {
@@ -641,18 +640,17 @@ var do_httpd = function () {
             var   _since    = _parsed.query.since;
 
             if (!_market) {
-              res.statusCode = 204;
+              res.statusCode = 404;
               res.end(JSON.stringify({
-                  pathname: _parsed.pathname,
-                  message:  'bad market',
+                  message:  'Bad market. Available markets: ' + Object.keys(markets).join(", "),
                   market:   _market
                 }, undefined, 2));
             }
             else if (!_since || !_since.match(/^\d+$/)) {
-              res.statusCode = 204;
+              res.statusCode = 404;
               res.end(JSON.stringify({
                   trades: true,
-                  since: 'missing'
+                  message: 'Missing since.'
                 }, undefined, 2));
             }
             else {
@@ -703,10 +701,9 @@ var do_httpd = function () {
             var   _since    = _parsed.query.since;
 
             if (!(_market in markets)) {
-              res.statusCode = 204;
+              res.statusCode = 404;
               res.end(JSON.stringify({
-                  pathname: _parsed.pathname,
-                  message:  'bad market',
+                  message:  'Bad market. Available markets: ' + Object.keys(markets).join(", "),
                   market:   _market
                 }, undefined, 2));
             }
@@ -719,8 +716,8 @@ var do_httpd = function () {
           {
             res.statusCode = 404;
             res.end(JSON.stringify({
-                message: 'not found',
-                parsed: JSON.stringify(_parsed, undefined, 2)
+                message: 'File not found.',
+                parsed: _parsed,
               }, undefined, 2));
           }
         });
