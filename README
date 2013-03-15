@@ -30,8 +30,8 @@ This warning is expected:
 
 Services pages at:
 * http://a.b.c.d/
-* http://a.b.c.d/XYZ/trades.json?since=1234
-* http://a.b.c.d/XYZ/orderbook.json
+* http://a.b.c.d/ABC/XYZ/trades.json?since=1234
+* http://a.b.c.d/ABC/XYZ/orderbook.json
 
 MySql Configuration
 
@@ -51,5 +51,5 @@ Currently Opencoin Inc runs this server at:
 * https://ripple.com/chart/
 
 Example outputs:
-* https://ripple.com/chart/XRP/trades.json?since=0
-* https://ripple.com/chart/XRP/orderbook.json
+* https://ripple.com/chart/BTC/XRP/trades.json?since=0
+* https://ripple.com/chart/BTC/XRP/orderbook.json
