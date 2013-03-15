@@ -21,16 +21,16 @@ the rippled server has acquired the effective genesis ledger.
 
 Operation
 
-Add curriences and markets at anytime.
+The program can be interrupted at anytime.
 
-Interrupt the program at anytime.
+Add curriences and markets at anytime.  Then, restart.
 
 This warning is expected:
 * (node) warning: possible EventEmitter memory leak detected.
 
 Services pages at:
 * http://a.b.c.d/
-* http://a.b.c.d/XYZ/trades.json?since=ABC
+* http://a.b.c.d/XYZ/trades.json?since=1234
 * http://a.b.c.d/XYZ/orderbook.json
 
 MySql Configuration
@@ -48,4 +48,8 @@ npm install async mysql@2.0.0-alpha7 ripple-lib
 Live Server
 
 Currently Opencoin Inc runs this server at:
-* https://ripple.com/charts/
+* https://ripple.com/chart/
+
+Example outputs:
+* https://ripple.com/chart/XRP/trades.json?since=0
+* https://ripple.com/chart/XRP/orderbook.json
