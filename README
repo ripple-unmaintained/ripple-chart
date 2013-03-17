@@ -19,19 +19,16 @@ consistent database.
 To create, the cleanest database, the program will not being importation until
 the rippled server has acquired the effective genesis ledger.
 
-Operation
-
-The program can be interrupted at anytime.
-
-Add curriences and markets at anytime.  Then, restart.
-
-This warning is expected:
-* (node) warning: possible EventEmitter memory leak detected.
-
 Serves pages at:
 * http://a.b.c.d/
 * http://a.b.c.d/ABC/XYZ/trades.json?since=1234
 * http://a.b.c.d/ABC/XYZ/orderbook.json
+
+Installation
+
+* npm install async mysql@2.0.0-alpha7 ripple-lib
+* cp -p config-examples.js config.js
+* Edit config.js as needed.
 
 MySql Configuration
 
@@ -41,9 +38,14 @@ CREATE DATABASE rbc;
 
 GRANT ALL PRIVILEGES ON rbc.* to 'rbc'@'localhost' IDENTIFIED BY 'password';
 
-Requirements
+Operation
 
-npm install async mysql@2.0.0-alpha7 ripple-lib
+The program can be interrupted at anytime.
+
+Add curriences and markets at anytime.  Then, restart.
+
+This warning is expected:
+* (node) warning: possible EventEmitter memory leak detected.
 
 Live Server
 
