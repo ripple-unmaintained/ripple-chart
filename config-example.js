@@ -10,10 +10,11 @@ exports.mysql_config = {
 };
 
 exports.config = {
-  genesis_ledger: 32570,      // Effective genesis ledger.
-// genesis_ledger: 205799,    // First notable trade here.
-  trade_limit: 1000,          // Maximum number of trades to return at once.
-  table_type: 'MyISAM',       // ISAM, MyISAM (no INNODB)
+//  genesis_ledger:     32570,      // Effective genesis ledger.
+  genesis_ledger:     152370,     // First notable trade here.
+  trade_limit:        1000,       // Maximum number of trades to return at once.
+  table_type:         'MyISAM',   // ISAM, MyISAM (no INNODB)
+  checkpoint_always:  true,
 };
 
 exports.httpd_config = {
@@ -28,14 +29,13 @@ exports.rippled_config = {
   websocket_ssl:  false,
 };
 
-exports.btc_gateways = {
-  rpvfJ4mR6QQAeogpXEKnuyGBx8mYCSnYZi: 'weex', // BTC
-  rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B:  'bitstamp',
-};
-
 exports.markets = {
   AUD: {
     rBcYpuDT1aXNo4jnqczWJTytKGdBGufsre: 'weex',
+  },
+  BTC: {
+    rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B:  'bitstamp',
+    rpvfJ4mR6QQAeogpXEKnuyGBx8mYCSnYZi: 'weex',
   },
   CAD: {
     r47RkFi1Ew3LvCNKT6ufw3ZCyj5AJiLHi9: 'weex',

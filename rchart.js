@@ -9,6 +9,7 @@
 //
 
 var async           = require('async');
+var EventEmitter    = require('events').EventEmitter;
 var http            = require("http");
 var mysql           = require('mysql');
 var url             = require("url");
@@ -19,7 +20,6 @@ var UInt160         = require("ripple-lib").UInt160;
 
 var Range           = require('./range').Range;
 
-var btc_gateways    = require("./config").btc_gateways;
 var config          = require("./config").config;
 var httpd_config    = require("./config").httpd_config;
 var markets         = require("./config").markets;
@@ -27,37 +27,67 @@ var mysql_config    = require("./config").mysql_config;
 var rippled_config  = require("./config").rippled_config;
 
 var remote;
-var sources = [];
+var currencies      = Object.keys(markets);
+var sources         = [];
 
-var processed = {
-};
+var pairs   = [
+  // [ 'CCY1', CCY2' ], ...   // 'CCY1' < 'CCY2'
+];
+
+var processed = {};
 
 // Information to serve on the status page.
 var info    = {
-  btc_gateways: btc_gateways,
   markets:      markets,
 };
 
 // A cache of the asks and bids for all order books cared about.
-// The web server services this structure.
-// This structure is updated on each ledger_close.
-// CUR : { "asks" : [[price, amount], ...], "bids" : [...] }
-var books = {};
+// The web server serves this structure.
+// Constraint: CCY1 != CCY2
+var books = {
+  // CCY1CCY2: {
+  //   ledger_index: index,      // The version text presents.
+  //   text: string              // The order book as text.
+  //   processing: EventEmitter, // Build a new version of text. Listen here for announcement.
+  //   asks: array,
+  //   bids: array,
+  // },
+};
+
+// Takes an array of arrays.
+var permute = function (_arrays) {
+// console.log("permute: ", JSON.stringify(_arrays));
+  if (!_arrays.length) {
+    return [];
+  }
+  else if (_arrays.length === 1) {
+    return _arrays[0].map(function (_e) { return [_e]; });
+  }
+  else {
+    var _tail_permuted = permute(_arrays.slice(1));
+
+    return [].concat.apply([],
+      _arrays[0].map(function (_e) {
+          return _tail_permuted.map(function (_t) {
+              return [_e].concat(_t);
+            });
+        }));
+  }
+};
 
 // Return the minimum next ledger to process.
 var leger_next = function () {
   var   ledger_index;
 
-  Object.keys(markets).forEach(function (currency) {
-      Object.keys(markets[currency]).forEach(function (address) {
-          var i = processed[currency][address].is_empty()
-                    ? config.genesis_ledger
-                    : processed[currency][address].last()+1;
+// console.log("leger_next: processed: %s", JSON.stringify(processed, undefined, 2));
+  sources.forEach(function (_source) {
+      var i = processed[_source.currency][_source.issuer].is_empty()
+                ? config.genesis_ledger
+                : processed[_source.currency][_source.issuer].last()+1;
 
-          if (!ledger_index || i < ledger_index) {
-            ledger_index  = i; 
-          }
-        });
+      if (!ledger_index || i < ledger_index) {
+        ledger_index  = i; 
+      }
     });
 
 //console.log("leger_next: %s", JSON.stringify(ledger_index));
@@ -68,19 +98,12 @@ var leger_next = function () {
 var wanted_ledger = function (ledger_index) {
   var _wanted  = [];
 
-  Object.keys(markets).forEach(function (currency) {
-      Object.keys(markets[currency]).forEach(function (address) {
-          var _next = processed[currency][address].is_empty()
-                        ? config.genesis_ledger
-                        : processed[currency][address].last()+1;
+  return sources.filter(function(_source) {
+      var _next = processed[_source.currency][_source.issuer].is_empty()
+                    ? config.genesis_ledger
+                    : processed[_source.currency][_source.issuer].last()+1;
 
-          if (_next === ledger_index) {
-            _wanted.push({
-                currency: currency,
-                issuer:   address
-              });
-          }
-        });
+      return _next === ledger_index;
     });
 
 //console.log("wanted: %s", JSON.stringify(_wanted));
@@ -97,19 +120,15 @@ var set_processed = function (source, ledger_index) {
 //console.log("_processed% %s > '%s'", JSON.stringify(source), _processed.to_string());
 };
 
+// Persist the state of each processed source.
 var replace_processed = function (conn, done) {
-  var _rows  = [];
-
-  Object.keys(markets).forEach(function (currency) {
-      Object.keys(markets[currency]).forEach(function (address) {
-            _rows.push(
-              [
-                currency,
-                address,
-                processed[currency][address].to_string(),
-              ]);
-        });
-    });
+  var _rows  = sources.map(function (_source) {
+                return [
+                  _source.currency,
+                  _source.issuer,
+                  processed[_source.currency][_source.issuer].to_string(),
+                ];
+              });
 
 // console.log("REPLACE: ", JSON.stringify(_rows, undefined, 2));
 
@@ -129,20 +148,34 @@ var replace_processed = function (conn, done) {
 };
 
 var setup_tables = function () {
-  // Make an array of source objects.
-  Object.keys(markets).forEach(function (currency) {
-      processed[currency] = {};
+  permute([Object.keys(markets), Object.keys(markets)]).forEach(function (_pair) {
+      var _ccy1 = _pair[0];
+      var _ccy2 = _pair[1];
 
-      Object.keys(markets[currency]).forEach(function (address) {
+      if (_ccy1 < _ccy2) {
+        // Initialize list of currency pairs.
+        pairs.push([_ccy1, _ccy2]);
+      }
+
+      if (_ccy1 != _ccy2) {
+        // Initialize order book cache.
+        books[_ccy1+_ccy2] = {};
+      }
+  });
+
+  Object.keys(markets).forEach(function (_currency) {
+      processed[_currency] = {};
+
+      Object.keys(markets[_currency]).forEach(function (_issuer) {
+          // Initialize array of sources.
           sources.push({
-              currency: currency,
-              issuer:   address
+              currency: _currency,
+              issuer:   _issuer
             });
 
-          processed[currency][address] = new Range;
+          // Initialize table of ranges processed for each source.
+          processed[_currency][_issuer] = new Range;
         });
-
-      books[currency] = { asks: [], bids: [] };
     });
 };
 
@@ -175,9 +208,9 @@ var insert_ledger = function (conn, records, done) {
   // console.log("source: ", JSON.stringify(records));
   if (records.length) 
   {
-    conn.query("INSERT Trades (Hash, Currency, LedgerTime, LedgerIndex, Price, Amount) VALUES ?",
+    conn.query("INSERT Trades (Hash, Market, Pays, Gets, LedgerTime, LedgerIndex, Price1, Amount1, Price2, Amount2) VALUES ?",
         records.map(function (r) {
-          return [[ r.Hash, r.Currency, r.LedgerTime, r.LedgerIndex, r.Price, r.Amount ]];
+          return [[ r.Hash, r.Market, r.Pays, r.Gets, r.LedgerTime, r.LedgerIndex, r.Price1, r.Amount1, r.Price2, r.Amount2 ]];
         }),
       function (err, results) {
         if (err && 'ER_DUP_ENTRY' === err.code)
@@ -247,79 +280,80 @@ var process_ledger = function (conn, ledger_index, done) {
               if (base
                 && base.LedgerEntryType === 'Offer'
                 && base.PreviousFields
-                && 'TakerGets' in base.PreviousFields
-                && 'TakerPays' in base.PreviousFields) {
+                && 'TakerPays' in base.PreviousFields
+                && 'TakerGets' in base.PreviousFields) {
                 var pf          = base.PreviousFields;
                 var ff          = base.FinalFields;
 
-                var taker_got   = Amount.from_json(pf.TakerGets).subtract(Amount.from_json(ff.TakerGets));
-                var taker_paid  = Amount.from_json(pf.TakerPays).subtract(Amount.from_json(ff.TakerPays));
-                var b_got_btc   = taker_got.currency().to_human() == 'BTC';
-                var b_paid_btc  = taker_paid.currency().to_human() == 'BTC';
+                var taker_pays    = Amount.from_json(pf.TakerPays).subtract(Amount.from_json(ff.TakerPays));
+                var taker_gets    = Amount.from_json(pf.TakerGets).subtract(Amount.from_json(ff.TakerGets));
 
-                if (b_got_btc != b_paid_btc && taker_got.is_positive() && taker_paid.is_positive())
+                var pays_currency = taker_pays.currency().to_human();
+                var pays_issuer   = taker_pays.issuer().to_json();
+                var gets_currency = taker_gets.currency().to_human();
+                var gets_issuer   = taker_gets.issuer().to_json();
+
+                if (taker_gets.is_positive()
+                  && taker_pays.is_positive()
+                  && markets[pays_currency]
+                  && (markets[pays_currency][pays_issuer] || pays_currency == 'XRP')
+                  && markets[gets_currency]
+                  && (markets[gets_currency][gets_issuer] || gets_currency == 'XRP'))
                 {
-                  b_asking  = b_paid_btc;
+//  console.log("l=%s t=%s", ledger.ledger_index, JSON.stringify(t));
+                  var record = {
+                    Hash:         t.hash,
+                    Market:       pays_currency < gets_currency
+                                    ? pays_currency+gets_currency
+                                    : gets_currency+pays_currency,
+                    Pays:         pays_currency,
+                    Gets:         gets_currency,
+                    LedgerTime:   ledger.close_time,
+                    LedgerIndex:  ledger.ledger_index,
+                    Price1:       taker_gets.ratio_human(taker_pays).to_human({
+                                      precision: 8,
+                                      group_sep: false,
+                                    }),
+                    Amount1:      taker_pays.to_human({
+                                      precision: 8,
+                                      group_sep: false,
+                                    }),
+                    Price2:       taker_pays.ratio_human(taker_gets).to_human({
+                                      precision: 8,
+                                      group_sep: false,
+                                    }),
+                    Amount2:      taker_gets.to_human({
+                                      precision: 8,
+                                      group_sep: false,
+                                    }),
+                  };
 
-                  // Prefer taker_paid to be BTC.
-                  if (b_got_btc) {
-                    var tg  = taker_got;
-                    var tp  = taker_paid;
-
-                    taker_got   = tp;
-                    taker_paid  = tg;
+                  if (!ledger_out)
+                  {
+                    ledger_out = true;
+                    // console.log("LEDGER: ", ledger_index);
+                    // console.log("LEDGER: ", JSON.stringify(ledger, undefined, 2));
+                    // console.log("t: ", JSON.stringify(t, undefined, 2));
                   }
 
-                  var paid_issuer    = taker_paid.issuer().to_json();
-                  var got_currency  = taker_got.currency().to_human();
-                  var got_issuer    = taker_got.issuer().to_json();
+                  // console.log("Record: ", JSON.stringify(record));
 
-                  if (btc_gateways[paid_issuer]   // Have a btc we care about
-                    && (taker_got.is_native()
-                      || (markets[got_currency] && markets[got_currency][got_issuer]))) { // Have an counter currency we care about.
+                  // console.log("KEEP: %s %s > %s %s", pays_currency, gets_currency, pays_currency, gets_currency);
+                  trades.push(record);
 
-                    var record = {
-                      Hash:         t.hash,
-                      Currency:     got_currency,
-                      LedgerTime:   ledger.close_time,
-                      LedgerIndex:  ledger.ledger_index,
-                      Price:        taker_got.divide(taker_paid).to_human({
-                                        precision: 4,
-                                        group_sep: false,
-                                      }),
-                      Amount:       taker_paid.to_human({
-                                        precision: 8,
-                                        group_sep: false,
-                                      }),
-                    };
+                  // console.log("TRADE: %s for %s", taker_pays.to_human_full(), taker_gets.to_human_full());
 
-                    if (!ledger_out)
-                    {
-                      ledger_out = true;
-                      // console.log("LEDGER: ", ledger_index);
-                      // console.log("LEDGER: ", JSON.stringify(ledger, undefined, 2));
-                      // console.log("t: ", JSON.stringify(t, undefined, 2));
-                    }
-
-                    // console.log("Record: ", JSON.stringify(record));
-
-                    trades.push(record);
-
-                    // console.log("TRADE: %s for %s", taker_paid.to_human_full(), taker_got.to_human_full());
-
-                    // console.log("Node: ", JSON.stringify(n, undefined, 2));
-                  }
+                  // console.log("Node: ", JSON.stringify(n, undefined, 2));
                 }
               }
             });
 
           if (trades.length)
           {
-            trades.sort(function (a,b) {
-                return b_asking
-                  ? b.Price-a.Price             // Selling BTC, better, higher prices first.
-                  : a.Price-b.Price;            // Buying BTC, better, lower, prices first.
-              });
+            // Trades should be order always better to worse quality.
+            // Better quality is a smaller number of pays/gets so the value increases.
+            // The natural price will be pays/gets. Regardless of view.
+            trades.sort(function (a,b) { b.Price2-a.Price2 }); // Normal order: lowest first
 
             records = records.concat(trades);
           }
@@ -334,13 +368,19 @@ var process_ledger = function (conn, ledger_index, done) {
                   set_processed(s, ledger_index);
                 });
 
-              // replace_processed(conn, done);
+              if (!('checkpoint_always' in config) || config.checkpoint_always)
+              {
+                replace_processed(conn, done);
+              }
+              else
+              {
+                done();
+              }
             }
             else
             {
-              // done(err);
+              done(err);
             }
-            done(err);
           });
       })
     .request();
@@ -351,7 +391,7 @@ var process_ledger = function (conn, ledger_index, done) {
 var process_range = function (conn, validated_ledgers, done)
 {
   // Do wanted strictly in order.
-  // XXX Later add a list of ledgers to skip in the config.
+  // XXX Later to handle missing ledgers, add a list of ledgers to skip in the config.
   
   var ledger_index  = leger_next();
 // console.log("NEXT: ", ledger_index);
@@ -374,6 +414,7 @@ var process_range = function (conn, validated_ledgers, done)
   }
 };
 
+// Build the trade database.
 var process_validated = function (str_validated_ledgers)
 {
   var self              = this;
@@ -438,98 +479,190 @@ var db_perform = function (callback, done) {
       });
 };
 
-var process_books = function (ledger_index) {
-  var books_new = {};
+// _ccy1, _ccy2 : The view point to compute.
+var orderbook_add = function (_ccy1, _ccy2, _taker_pays, _taker_gets) {
+  // _ccy2 per _ccy1
+  var _side = 'bids';
 
-  Object.keys(markets).forEach(function (_currency) {
-      books_new[_currency] = { asks: [], bids: [] };
-    });
+  if (_taker_gets.currency().to_human() === _ccy1) {
+    var _gets = _taker_gets;
+    var _pays = _taker_pays;
 
-  // console.log("MARKETS %s", JSON.stringify(Object.keys(markets)));
-  async.each(Object.keys(markets), function (_currency, market_callback) {
-      var _pairs  = [];
+    _taker_gets = _pays;
+    _taker_pays = _gets;
 
-      Object.keys(markets[_currency]).forEach(function (cur_address) {
-        var _cur  = {
-          currency: _currency,
-          issuer:   cur_address,
-        };
+    _side = 'asks';
+  }
 
-        Object.keys(btc_gateways).forEach(function (btc_address) {
-            var _btc  = {
-              currency: 'BTC',
-              issuer:   btc_address,
-            };
+  var _price        = _taker_gets.ratio_human(_taker_pays).to_human({
+                            precision: 8,
+                            group_sep: false,
+                          });
 
-            _pairs.push({ gets: _btc, pays: _cur }, { gets: _cur, pays: _btc });
-          });
+  // _ccy1
+  var _amount       = _taker_pays.to_human({
+                            precision: 8,
+                            group_sep: false,
+                          });
+// console.log("orderbook_add: %s%s %s %s %s %s", _ccy1, _ccy2, _price, _amount,_taker_pays.to_human(), _taker_gets.to_human());
+
+  if (Number(_price)) {
+// console.log("orderbook_add: %s%s %s %s", _ccy1, _ccy2, JSON.stringify(_taker_gets), _side);
+// console.log("orderbook_add: %s%s _price: %s %s %s %s", _ccy1, _ccy2, _side, Number(_price), _price, _amount);
+    books[_ccy1+_ccy2][_side].push( [ _price, _amount ] );
+  }
+};
+
+// Add orders to bids and asks.
+//
+// books[ BTCUSD ] = books[ ccy1ccy2 ]
+//   bids
+//     ==            biding USD     buying BTC
+//     == offers offer_pays USD offer_gets BTC  <= offer creators point of view
+//     == offers taker_gets USD taker_pays BTC  <= someone taking the offer.
+//     == waiting for someone to sell BTC
+var orderbook_build = function (_ccy1, _ccy2, _offers) {
+// console.log("orderbook_build: %s%s %s", _ccy1, _ccy2, JSON.stringify(_offers));
+// console.log("orderbook_build: %s%s %s", _ccy1, _ccy2, _offers.length);
+  _offers
+    .forEach(function (o) {
+        // console.log("OFFER: ", JSON.stringify(o, undefined, 2));
+
+        var _taker_pays = Amount.from_json('taker_pays_funded' in o ? o.taker_pays_funded : o.TakerPays);
+        var _taker_gets = Amount.from_json('taker_gets_funded' in o ? o.taker_gets_funded : o.TakerGets);
+
+        if (_taker_pays.is_positive() && _taker_gets.is_positive()) {
+          orderbook_add(_ccy1, _ccy2, _taker_pays, _taker_gets);
+          orderbook_add(_ccy2, _ccy1, _taker_pays, _taker_gets);  // The other view point.
+        }
+      });
+};
+
+// Generate .text.
+var orderbook_output = function (_ccy1, _ccy2, _ledger_index) {
+// console.log("orderbook_output: %s%s %s", _ccy1, _ccy2, _ledger_index);
+// console.log("orderbook_output: bids: %s", books[_ccy1+_ccy2].bids.length);
+// console.log("orderbook_output: asks: %s", books[_ccy1+_ccy2].asks.length);
+  
+  // Sort orders.
+  // asks = low to high
+  books[_ccy1+_ccy2].asks.sort(function (a, b) { return Number(a[0])-Number(b[0]); });
+  // bids = high to low
+  books[_ccy1+_ccy2].bids.sort(function (a, b) { return Number(b[0])-Number(a[0]); });
+
+// console.log("orderbook_output: bids: %s asks: %s", books[_ccy1+_ccy2].bids.length, books[_ccy1+_ccy2].asks.length);
+// console.log("orderbook_output: asks: %s", JSON.stringify(books[_ccy1+_ccy2].asks, undefined, 2));
+  // Build output.
+  books[_ccy1+_ccy2].text  = JSON.stringify({
+      bids: books[_ccy1+_ccy2].bids,
+      asks: books[_ccy1+_ccy2].asks
+    }, undefined, 2);
+
+  // Set version.
+  books[_ccy1+_ccy2].ledger_index = _ledger_index;
+
+  // Announce to waiters.
+// console.log("orderbook_output: emit: %s%s", _ccy1, _ccy2);
+  books[_ccy1+_ccy2].processing.emit(_ccy1+_ccy2);
+
+  // No longer processing.
+  delete books[_ccy1+_ccy2].processing;
+};
+
+// <-- { code: 123, text: foo }
+var orderbook_get = function (_ccy1, _ccy2, _done) {
+// console.log("orderbook_get: %s%s", _ccy1, _ccy2);
+  if (books[_ccy1+_ccy2].ledger_index === info.ledger.ledger_index) {
+    // Cached
+    // console.log("orderbook_get: cached: %s%s", _ccy1, _ccy2);
+
+    _done({
+        code: 200,
+        text: books[_ccy1+_ccy2].text
+      });
+  }
+  else if (books[_ccy1+_ccy2].processing) {
+    // In process.
+  
+    // console.log("orderbook_get: listen: %s%s", _ccy1, _ccy2);
+
+    // Listen for the end result.
+    books[_ccy1+_ccy2]
+      .processing
+      .once(_ccy1+_ccy2, function () {
+          // console.log("orderbook_get: event: %s%s", _ccy1, _ccy2);
+          orderbook_get(_ccy1, _ccy2, _done);
+        });
+  }
+  else {
+    // Need to get and build it.
+    var _ledger_index = info.ledger.ledger_index;
+
+    var _process      = new EventEmitter();
+
+    books[_ccy1+_ccy2].processing  = _process;
+    books[_ccy2+_ccy1].processing  = _process;
+
+    // Listen for end result.
+    orderbook_get(_ccy1, _ccy2, _done);
+
+    [ 'bids', 'asks' ].forEach(function (_side) {
+        books[_ccy1+_ccy2][_side] = [];
+        books[_ccy2+_ccy1][_side] = [];
       });
 
-      // console.log("MARKET> %s", _currency);
-      async.some(_pairs, function (_pair, callback) {
-          remote.request_book_offers(_pair.gets, _pair.pays)
-            .ledger_index(ledger_index)
-            .on('success', function (m) {
-                // console.log("BOOK: ", JSON.stringify(m, undefined, 2));
+    // Build source pairs: both sides of books we need to get.
+    var _source_pairs  = 
+      permute([
+        sources.filter(function (_source) {
+            return _source.currency === _ccy1;
+          }),
+        sources.filter(function (_source) {
+            return _source.currency === _ccy2;
+          })
+        ]);
 
-                var _side = _pair.gets.currency === 'BTC' ? 'asks' : 'bids';
+    // Get the other side of each book too.
+    var _pairs_both = _source_pairs.concat(_source_pairs.map(function (_pair) {
+        return [].concat(_pair).reverse();
+      }));
 
-                books_new[_currency][_side] = books_new[_currency][_side].concat(
-                  m.offers
-                    .map(function (o) {
-                        // console.log("OFFER: ", JSON.stringify(o, undefined, 2));
+// console.log("sources: ", JSON.stringify(sources, undefined, 2));
+// console.log("_source_pairs: ", JSON.stringify(_source_pairs));
+    async.each(_pairs_both,
+        function (_pair, _callback) {
+            remote.request_book_offers(_pair[0], _pair[1])
+              .ledger_index(_ledger_index)
+              .on('success', function (m) {
+// console.log("*** book_offers: %s %s", JSON.stringify(_pair), _ledger_index);
+// console.log("*** book_offers: %s %s %s", JSON.stringify(_pair), _ledger_index, JSON.stringify(m.offers));
+                  orderbook_build(_pair[0].currency, _pair[1].currency, m.offers);
+                  _callback();
+                })
+              .on('error', function (m) {
+                  console.log("ERROR BOOK: ", JSON.stringify(m, undefined, 2));
 
-                        var _taker_gets = Amount.from_json('taker_gets_funded' in o ? o.taker_gets_funded : o.TakerGets);
-                        var _taker_pays = Amount.from_json('taker_pays_funded' in o ? o.taker_pays_funded : o.TakerPays);
-
-                        if (_side === 'asks') {
-                          var _tg = _taker_gets;
-                          var _tp = _taker_pays;
-
-                          _taker_gets = _tp;
-                          _taker_pays = _tg;
-                        }
-
-                        var _price      = _taker_gets.divide(_taker_pays).to_human({
-                                            precision: 8,
-                                            group_sep: false,
-                                          });
-                        var _amount     = _taker_pays.to_human({
-                                            precision: 8,
-                                            group_sep: false,
-                                          });
-
-                        return Number(_price) ? [_price, _amount] : null;
-                      })
-                    .filter(function (o) { return o; })
-                  );
-
-                callback();
-              })
-            .on('error', function (m) {
-                console.log("ERROR BOOK: ", JSON.stringify(m, undefined, 2));
-
-                callback(m);
-              })
-            .request();
-            
-        }, function (err) {
+                  _callback(m);
+                })
+              .request();
+          },
+        function (err) {
           if (err) {
-            console.log("process_books: error: ledger_index: %s market: %s", ledger_index, _currency);
+// console.log("orderbook_get: err");
+            _done({
+                code: 500,
+                text: "Internal server error."
+              });
           }
           else {
-            // console.log("REVISE BOOK: %s %s", _currency, JSON.stringify(books_new[_currency], undefined, 2));
-            books_new[_currency].bids.sort(function (a, b) { return Number(b[0])-Number(a[0]); });
-            books_new[_currency].asks.sort(function (a, b) { return Number(a[0])-Number(b[0]); });
+// console.log("orderbook_get: all");
+            // Have all the offers.
 
-            books[_currency] = books_new[_currency];
+            orderbook_output(_ccy1, _ccy2, _ledger_index);
+            orderbook_output(_ccy2, _ccy1, _ledger_index);
           }
-
-          market_callback(err);
         });
-
-      }, function (err) {
-      });
+  }
 };
 
 var do_reset = function () {
@@ -574,15 +707,19 @@ var do_reset = function () {
         function (callback) {
             var sql_create_transactions =
                 "CREATE TABLE Trades ("
-              + "  Currency     CHARACTER(3),"
-              + "  LedgerTime   INTEGER UNSIGNED,"               // ledger_time
-              + "  LedgerIndex  INTEGER UNSIGNED,"               // ledger_index
+              + "  Market       CHARACTER(6),"                    // Market           (e.g. BTCUSD)
+              + "  Pays         CHARACTER(3),"                    // Unit.            (e.g. BTC)
+              + "  Gets         CHARACTER(3),"                    // Quoted by price. (e.g. USD)
+              + "  LedgerTime   INTEGER UNSIGNED,"                // ledger_time
+              + "  LedgerIndex  INTEGER UNSIGNED,"                // ledger_index
               + "  Hash         CHARACTER(32) UNIQUE,"
-              + "  Price        VARCHAR(32),"
-              + "  Amount       VARCHAR(32),"
+              + "  Price1       VARCHAR(32),"                     // CCY2 per CCY1 (e.g. USD per BTC for BTCUSD)
+              + "  Amount1      VARCHAR(32),"                     // How many units of CCY1.
+              + "  Price2       VARCHAR(32),"                     // CCY1 per CCY2 (e.g. USD per BTC for BTCUSD)
+              + "  Amount2      VARCHAR(32),"                     // How many units of CCY2.
               + "  Tid          INTEGER UNSIGNED NOT NULL AUTO_INCREMENT,"
               + ""
-              + "  UNIQUE name (Currency, Tid)"
+              + "  UNIQUE name (Market, Tid)"
               + ") TYPE = " + config.table_type + ";";
 
           conn.query(sql_create_transactions, function (err, results) {
@@ -635,11 +772,12 @@ var do_httpd = function () {
             res.end(JSON.stringify(info, undefined, 2));
 
           }
-          else if (_m = _parsed.pathname.match(/^\/(...)\/trades.json$/)) {
-            var   _market   = _m[1] && _m[1] in markets && _m[1];
-            var   _since    = _parsed.query.since;
+          else if (_m = _parsed.pathname.match(/^\/(...)\/(...)\/trades.json$/)) {
+            var   _ccy1   = _m[1] && _m[1] in markets && _m[1];
+            var   _ccy2   = _m[2] && _m[2] in markets && _m[2];
+            var   _since  = _parsed.query.since;
 
-            if (!_market) {
+            if (!_ccy1 || !_ccy2) {
               res.statusCode = 404;
               res.end(JSON.stringify({
                   message:  'Bad market. Available markets: ' + Object.keys(markets).join(", "),
@@ -659,8 +797,10 @@ var do_httpd = function () {
                     done(err);
                   }
                   else {
-                    conn.query("SELECT * FROM Trades WHERE Currency=? AND Tid > ? ORDER BY Tid ASC LIMIT ?",
-                      [_market, Number(_since), config.trade_limit],
+                    var _market = _ccy1 < _ccy2 ? _ccy1+_ccy2 : _ccy2+_ccy1;
+
+                    conn.query("SELECT * FROM Trades WHERE Tid > ? AND Market=? ORDER BY Tid ASC LIMIT ?",
+                      [Number(_since), _market, config.trade_limit],
                       function (err, results) {
                           if (err) {
                             console.log("err: %s", JSON.stringify(err, undefined, 2));
@@ -673,8 +813,8 @@ var do_httpd = function () {
                                 results.map(function (r) {
                                     return {
                                         date:   r.LedgerTime+946684800,
-                                        price:  r.Price, 
-                                        amount: r.Amount,
+                                        price:  _ccy1 == r.Pays ? r.Price1 : r.Price2, 
+                                        amount: _ccy1 == r.Pays ? r.Amount1 : r.Amount2,
                                         tid:    r.Tid
                                       };
                                   }), undefined, 1));
@@ -696,11 +836,11 @@ var do_httpd = function () {
                 });
             }
           }
-          else if (_m = _parsed.pathname.match(/^\/(...)\/orderbook.json$/)) {
-            var   _market   = _m[1];
-            var   _since    = _parsed.query.since;
+          else if (_m = _parsed.pathname.match(/^\/(...)\/(...)\/orderbook.json$/)) {
+            var   _ccy1   = _m[1];
+            var   _ccy2   = _m[2];
 
-            if (!(_market in markets)) {
+            if (!(_ccy1 in markets) || !(_ccy2 in markets) || _ccy1 === _ccy2) {
               res.statusCode = 404;
               res.end(JSON.stringify({
                   message:  'Bad market. Available markets: ' + Object.keys(markets).join(", "),
@@ -708,8 +848,10 @@ var do_httpd = function () {
                 }, undefined, 2));
             }
             else {
-              res.statusCode = 200;
-              res.end(JSON.stringify(books[_market], undefined, 1));
+              orderbook_get(_ccy1, _ccy2, function (m) {
+                  res.statusCode = m.code;
+                  res.end(m.text);
+                });
             }
           }
           else
@@ -747,9 +889,7 @@ var do_perform = function () {
               info.ledger = m;
 
               if ('validated_ledgers' in m) {
-                process_validated(m.validated_ledgers);
-
-                process_books(m.ledger_index);
+                process_validated(m.validated_ledgers); // Build trade database.
               }
             })
           .on('error', function (e) {

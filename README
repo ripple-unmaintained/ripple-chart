@@ -9,7 +9,7 @@ rchart.js reset
 Theory
 
 This constructs a database suitable for servering to bitcoincharts.com as per:
-http://bitcoincharts.com/about/exchanges/
+* http://bitcoincharts.com/about/exchanges/
 
 Each time the database is created, the results may vary. Therefore, if the
 database is lost, the new database will be inconsistent with the previous
@@ -28,7 +28,7 @@ Add curriences and markets at anytime.  Then, restart.
 This warning is expected:
 * (node) warning: possible EventEmitter memory leak detected.
 
-Services pages at:
+Serves pages at:
 * http://a.b.c.d/
 * http://a.b.c.d/ABC/XYZ/trades.json?since=1234
 * http://a.b.c.d/ABC/XYZ/orderbook.json
@@ -50,6 +50,6 @@ Live Server
 Currently Opencoin Inc runs this server at:
 * https://ripple.com/chart/
 
-Example outputs:
-* https://ripple.com/chart/BTC/XRP/trades.json?since=0
-* https://ripple.com/chart/BTC/XRP/orderbook.json
+Pages for bitcoincharts.com:
+* https://ripple.com/chart/BTC/USD/trades.json?since=0
+* https://ripple.com/chart/BTC/USD/orderbook.json
