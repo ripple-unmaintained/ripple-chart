@@ -14,7 +14,7 @@ exports.config = {
   genesis_ledger:     152370,     // First notable trade here.
   trade_limit:        1000,       // Maximum number of trades to return at once.
   table_type:         'MyISAM',   // ISAM, MyISAM (no INNODB)
-  checkpoint_always:  true,
+  checkpoint_always:  true,       // Checkpoint during initial build.
 };
 
 exports.httpd_config = {
