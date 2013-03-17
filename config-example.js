@@ -32,6 +32,7 @@ exports.rippled_config = {
 exports.markets = {
   AUD: {
     rBcYpuDT1aXNo4jnqczWJTytKGdBGufsre: 'weex',
+    rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B:  'bitstamp',
   },
   BTC: {
     rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B:  'bitstamp',
@@ -40,7 +41,16 @@ exports.markets = {
   CAD: {
     r47RkFi1Ew3LvCNKT6ufw3ZCyj5AJiLHi9: 'weex',
   },
+  CHF: {
+    rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B:  'bitstamp',
+  },
   EUR: {
+    rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B:  'bitstamp',
+  },
+  GBP: {
+    rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B:  'bitstamp',
+  },
+  JPY: {
     rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B:  'bitstamp',
   },
   USD: {
