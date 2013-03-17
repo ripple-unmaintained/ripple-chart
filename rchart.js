@@ -488,7 +488,7 @@ var orderbook_add = function (_ccy1, _ccy2, _taker_pays, _taker_gets) {
     _taker_gets = _pays;
     _taker_pays = _gets;
 
-    _side = 'asks';
+    _side       = 'asks';
   }
 
   var _price        = _taker_gets.ratio_human(_taker_pays).to_human({
@@ -746,10 +746,10 @@ var do_httpd = function () {
 
       req.setEncoding();
 
-      req.on('data', function (buffer) {
-          // console.log("DATA: %s", buffer);
-          // input = input + buffer;
-        });
+//    req.on('data', function (buffer) {
+//        // console.log("DATA: %s", buffer);
+//        // input = input + buffer;
+//      });
 
       req.on('end', function () {
           // console.log("END");
@@ -778,7 +778,7 @@ var do_httpd = function () {
               res.statusCode = 404;
               res.end(JSON.stringify({
                   message:  'Bad market. Available markets: ' + Object.keys(markets).join(", "),
-                  market:   _market
+                  market:   _ccy1+_ccy2
                 }, undefined, 2));
             }
             else if (!_since || !_since.match(/^\d+$/)) {
@@ -841,7 +841,7 @@ var do_httpd = function () {
               res.statusCode = 404;
               res.end(JSON.stringify({
                   message:  'Bad market. Available markets: ' + Object.keys(markets).join(", "),
-                  market:   _market
+                  market:   _ccy1+_ccy2
                 }, undefined, 2));
             }
             else {
