@@ -4,9 +4,6 @@
 //
 // Ripple server for bitcoincharts.com as per http://bitcoincharts.com/about/exchanges/
 //
-// Served at: /CUR/trades.json?since=123
-// Served at: /CUR/orderbook.json
-//
 
 var async           = require('async');
 var EventEmitter    = require('events').EventEmitter;
