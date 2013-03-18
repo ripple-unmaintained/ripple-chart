@@ -205,10 +205,12 @@ var insert_ledger = function (conn, records, done) {
   // console.log("source: ", JSON.stringify(records));
   if (records.length) 
   {
-    conn.query("INSERT Trades (Hash, Market, Pays, Gets, LedgerTime, LedgerIndex, Price1, Amount1, Price2, Amount2) VALUES ?",
+    conn.query("INSERT Trades (Hash, Market, ApplyIndex, Pays, Gets, LedgerTime, LedgerIndex, Price1, Amount1, Price2, Amount2) VALUES ?",
+        [
         records.map(function (r) {
-          return [[ r.Hash, r.Market, r.Pays, r.Gets, r.LedgerTime, r.LedgerIndex, r.Price1, r.Amount1, r.Price2, r.Amount2 ]];
-        }),
+// console.log("* node=%s", JSON.stringify(r, undefined, 2));
+          return [ r.Hash, r.Market, r.ApplyIndex, r.Pays, r.Gets, r.LedgerTime, r.LedgerIndex, r.Price1, r.Amount1, r.Price2, r.Amount2 ];
+        })],
       function (err, results) {
         if (err && 'ER_DUP_ENTRY' === err.code)
           err = null;
@@ -266,6 +268,7 @@ var process_ledger = function (conn, ledger_index, done) {
           var   trades  = [];
           var   b_asking;         // True if selling btc. Price going down.
 
+// console.log("l=%s nodes=%s", ledger.ledger_index, t.meta.AffectedNodes.length);
           t.meta.AffectedNodes.forEach(function (n) {
               var base;
               
@@ -281,7 +284,7 @@ var process_ledger = function (conn, ledger_index, done) {
                 && 'TakerGets' in base.PreviousFields) {
                 var pf          = base.PreviousFields;
                 var ff          = base.FinalFields;
-
+// console.log("- l=%s node=%s", ledger.ledger_index, JSON.stringify(base));
                 var taker_pays    = Amount.from_json(pf.TakerPays).subtract(Amount.from_json(ff.TakerPays));
                 var taker_gets    = Amount.from_json(pf.TakerGets).subtract(Amount.from_json(ff.TakerGets));
 
@@ -297,8 +300,10 @@ var process_ledger = function (conn, ledger_index, done) {
                   && markets[gets_currency]
                   && (markets[gets_currency][gets_issuer] || gets_currency == 'XRP'))
                 {
+// console.log("* l=%s node=%s", ledger.ledger_index, JSON.stringify(base));
 //  console.log("l=%s t=%s", ledger.ledger_index, JSON.stringify(t));
                   var record = {
+                    TransactionIndex: t.TransactionIndex,
                     Hash:         t.hash,
                     Market:       pays_currency < gets_currency
                                     ? pays_currency+gets_currency
@@ -350,7 +355,11 @@ var process_ledger = function (conn, ledger_index, done) {
             // Trades should be order always better to worse quality.
             // Better quality is a smaller number of pays/gets so the value increases.
             // The natural price will be pays/gets. Regardless of view.
-            trades.sort(function (a,b) { b.Price2-a.Price2 }); // Normal order: lowest first
+            trades.sort(function (a,b) { return Number(b.Price1)-Number(a.Price1); });  // Normal order: lowest first
+
+            var i = 0;
+            
+            trades.forEach(function (t) { t.ApplyIndex=i++; });      // Enumerate trades.
 
             records = records.concat(trades);
           }
@@ -707,15 +716,17 @@ var do_reset = function () {
               + "  Market       CHARACTER(6),"                    // Market           (e.g. BTCUSD)
               + "  Pays         CHARACTER(3),"                    // Unit.            (e.g. BTC)
               + "  Gets         CHARACTER(3),"                    // Quoted by price. (e.g. USD)
+              + "  ApplyIndex   INTEGER UNSIGNED,"                // Order applied in transaction.
               + "  LedgerTime   INTEGER UNSIGNED,"                // ledger_time
               + "  LedgerIndex  INTEGER UNSIGNED,"                // ledger_index
-              + "  Hash         CHARACTER(32) UNIQUE,"
+              + "  Hash         CHARACTER(32),"
               + "  Price1       VARCHAR(32),"                     // CCY2 per CCY1 (e.g. USD per BTC for BTCUSD)
               + "  Amount1      VARCHAR(32),"                     // How many units of CCY1.
               + "  Price2       VARCHAR(32),"                     // CCY1 per CCY2 (e.g. USD per BTC for BTCUSD)
               + "  Amount2      VARCHAR(32),"                     // How many units of CCY2.
               + "  Tid          INTEGER UNSIGNED NOT NULL AUTO_INCREMENT,"
               + ""
+              + "  UNIQUE idiom (Hash, ApplyIndex), "
               + "  UNIQUE name (Market, Tid)"
               + ") TYPE = " + config.table_type + ";";
 
@@ -798,7 +809,7 @@ var do_httpd = function () {
                   else {
                     var _market = _ccy1 < _ccy2 ? _ccy1+_ccy2 : _ccy2+_ccy1;
 
-                    conn.query("SELECT * FROM Trades WHERE Tid > ? AND Market=? ORDER BY Tid ASC LIMIT ?",
+                    conn.query("SELECT LedgerTime, Pays, Price1, Price2, Amount1, Amount2, Tid FROM Trades WHERE Tid > ? AND Market=? ORDER BY Tid ASC LIMIT ?",
                       [Number(_since), _market, config.trade_limit],
                       function (err, results) {
                           if (err) {
