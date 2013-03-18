@@ -754,6 +754,9 @@ var do_httpd = function () {
       req.on('end', function () {
           // console.log("END");
 
+          if (httpd_config.cors)
+            res.setHeader("Access-Control-Allow-Origin", "*");
+
           var _parsed = url.parse(req.url, true);
           var _m;
 
@@ -767,7 +770,6 @@ var do_httpd = function () {
 
             res.statusCode = 200;
             res.end(JSON.stringify(info, undefined, 2));
-
           }
           else if (_m = _parsed.pathname.match(/^\/(...)\/(...)\/trades.json$/)) {
             var   _ccy1   = _m[1] && _m[1] in markets && _m[1];

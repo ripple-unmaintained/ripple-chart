@@ -12,8 +12,9 @@ exports.mysql_config = {
 
 // Where to serve http requests.
 exports.httpd_config = {
-  ip:   "0.0.0.0",
-  port: 9005,
+  ip:           "0.0.0.0",
+  port:         9005,
+  cors:         false,          // true, to allow Cross-Origin Resource Sharing
 };
 
 // This will run much, much faster if your run against a local rippled.
@@ -27,7 +28,7 @@ exports.rippled_config = {
 // Specify the notable accounts to cross.
 //
 // TODO: This table could be improved by changing the account value to be the
-// ledger of the creation of the account. This would allow process for an
+// ledger of the creation of the account. This would allow processing for an
 // account to begin more appropriately and would remove need to specify the
 // genesis ledger.
 exports.markets = {
