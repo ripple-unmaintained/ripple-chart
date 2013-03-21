@@ -4,7 +4,7 @@
 
 Run as a web server:
 
-    rchart.js serve
+    rchart.js perform
 
 Initialize dbs:
 
