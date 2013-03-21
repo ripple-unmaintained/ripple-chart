@@ -459,7 +459,7 @@ var db_perform = function (callback, done) {
   var conn  = mysql.createConnection(mysql_config);
     conn
       .connect(function (err) {
-        // console.log("Conncted: %s", JSON.stringify(err, undefined, 2));
+        // console.log("Connected: %s", JSON.stringify(err, undefined, 2));
 
         // Connected, call the user function.
         callback(err, conn, function (err) {
@@ -702,7 +702,7 @@ var do_reset = function () {
               + "  Account      CHARACTER(35),"
               + "  Done         TEXT,"                            // Range of ledgers processed.
               + "  PRIMARY KEY (Currency, Account)"
-              + ") TYPE = " + config.table_type + ";";
+              + ") ENGINE = " + config.table_type + ";";
 
           conn.query(sql_create_processed, function (err, results) {
               // console.log("create_processed: %s", JSON.stringify(results, undefined, 2));
@@ -728,7 +728,7 @@ var do_reset = function () {
               + ""
               + "  UNIQUE idiom (Hash, ApplyIndex), "
               + "  UNIQUE name (Market, Tid)"
-              + ") TYPE = " + config.table_type + ";";
+              + ") ENGINE = " + config.table_type + ";";
 
           conn.query(sql_create_transactions, function (err, results) {
               // console.log("create_transactions: %s", JSON.stringify(results, undefined, 2));
