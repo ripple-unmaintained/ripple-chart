@@ -785,7 +785,7 @@ var do_httpd = function () {
           else if (_m = _parsed.pathname.match(/^\/(...)\/(...)\/trades.json$/)) {
             var   _ccy1   = _m[1] && _m[1] in markets && _m[1];
             var   _ccy2   = _m[2] && _m[2] in markets && _m[2];
-            var   _since  = _parsed.query.since;
+            var   _since  = _parsed.query.since || '0';
 
             if (!_ccy1 || !_ccy2) {
               res.statusCode = 404;
