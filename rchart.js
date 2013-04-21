@@ -284,7 +284,9 @@ var process_ledger = function (conn, ledger_index, done) {
                 && 'TakerGets' in base.PreviousFields) {
                 var pf          = base.PreviousFields;
                 var ff          = base.FinalFields;
-// console.log("- l=%s node=%s", ledger.ledger_index, JSON.stringify(base));
+// console.log("- l=%s node=%s", ledger.ledger_index, JSON.stringify(base, undefined, 2));
+//
+                // The price of taker_get/taker_pays
                 var taker_pays    = Amount.from_json(pf.TakerPays).subtract(Amount.from_json(ff.TakerPays));
                 var taker_gets    = Amount.from_json(pf.TakerGets).subtract(Amount.from_json(ff.TakerGets));
 
@@ -302,7 +304,31 @@ var process_ledger = function (conn, ledger_index, done) {
                 {
 // console.log("* l=%s node=%s", ledger.ledger_index, JSON.stringify(base));
 //  console.log("l=%s t=%s", ledger.ledger_index, JSON.stringify(t));
-                  var record = {
+                  var book_price    = Amount.from_quality(ff.BookDirectory, "1", "1");
+//console.log("book_price> ", book_price.to_human_full());
+
+                  if (taker_pays.is_native())
+                  {
+                    // Adjust for drops: The result would be a million times too large.
+
+                    book_price  = book_price.divide(Amount.from_json("1000000"));
+                  }
+
+                  if (taker_gets.is_native())
+                  {
+                    // Adjust for drops: The result would be a million times too small.
+
+                    book_price  = book_price.multiply(Amount.from_json("1000000"));
+                  }
+//console.log("book_price< ", book_price.to_human_full());
+//console.log(" old_price> ", taker_gets.ratio_human(taker_pays).to_human_full());
+//console.log(" old_price< ", taker_pays.ratio_human(taker_gets).to_human_full());
+//console.log("taker_pays> ", taker_pays.to_human_full());
+//console.log("taker_gets> ", taker_gets.to_human_full());
+//console.log("book_price> ", book_price.to_human_full());
+                  var gets_price  = book_price;
+                  var pays_price  = Amount.from_json("1.0/1/1").divide(gets_price);
+                  var record      = {
                     TransactionIndex: t.TransactionIndex,
                     Hash:         t.hash,
                     Market:       pays_currency < gets_currency
@@ -312,7 +338,7 @@ var process_ledger = function (conn, ledger_index, done) {
                     Gets:         gets_currency,
                     LedgerTime:   ledger.close_time,
                     LedgerIndex:  ledger.ledger_index,
-                    Price1:       taker_gets.ratio_human(taker_pays).to_human({
+                    Price1:       pays_price.to_human({
                                       precision: 8,
                                       group_sep: false,
                                     }),
@@ -320,7 +346,7 @@ var process_ledger = function (conn, ledger_index, done) {
                                       precision: 8,
                                       group_sep: false,
                                     }),
-                    Price2:       taker_pays.ratio_human(taker_gets).to_human({
+                    Price2:       gets_price.to_human({
                                       precision: 8,
                                       group_sep: false,
                                     }),
