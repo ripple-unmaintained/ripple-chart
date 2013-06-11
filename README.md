@@ -34,7 +34,7 @@ For Bitcoincharts, they would query only the `https://ripple.com/chart/BTC/` por
 ## Installation
 
 * `npm install async mysql@2.0.0-alpha7 ripple-lib`
-* `cp -p config-examples.js config.js`
+* `cp -p config-example.js config.js`
 * Edit `config.js` as needed.
 * Set up MySQL.
 
