@@ -242,6 +242,10 @@ var process_ledger = function (conn, ledger_index, done) {
         var   ledger      = m.ledger;
         var   records     = [];
 
+        if(ledger.transactions == undefined) {
+            ledger.transactions = []
+        }
+
         // Rewrite depricated format.
         ledger.transactions.forEach(function (t) {
           if (t.metaData)
@@ -779,14 +783,14 @@ var do_httpd = function () {
 
   var server  = http.createServer(function (req, res) {
       // console.log("CONNECT");
-      // var input = "";
+       var input = "";
 
       req.setEncoding();
 
-//    req.on('data', function (buffer) {
-//        // console.log("DATA: %s", buffer);
-//        // input = input + buffer;
-//      });
+    req.on('data', function (buffer) {
+         //console.log("DATA: %s", buffer);
+         input = input + buffer;
+      });
 
       req.on('end', function () {
           // console.log("END");
