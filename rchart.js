@@ -230,7 +230,7 @@ var insert_ledger = function (conn, records, done) {
 var process_ledger = function (conn, ledger_index, done) {
 //  console.log("!!!! process_ledger: ", ledger_index);
 
-  remote.request_ledger(undefined, { transactions: true, expand: true })
+  remote.request_ledger({ transactions: true, expand: true })
     .ledger_index(ledger_index)
     .on('error', function (m) {
         console.log("request error: ", JSON.stringify(m, undefined, 2));
@@ -241,10 +241,6 @@ var process_ledger = function (conn, ledger_index, done) {
         var   ledger_out  = false;
         var   ledger      = m.ledger;
         var   records     = [];
-
-        if(ledger.transactions == undefined) {
-            ledger.transactions = []
-        }
 
         // Rewrite depricated format.
         ledger.transactions.forEach(function (t) {
